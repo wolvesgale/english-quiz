@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>英単語クイズ</title>
+</head>
+<body>
+<h1>英単語クイズ（スマホ対応・CSV自動読み込み版）</h1>
+<p>このページは、指定のGoogleスプレッドシートCSVを自動で読み込み、ブラウザ上で英単語クイズを行うWebアプリです。</p>
+<iframe srcdoc="<script src='https://unpkg.com/papaparse@5.4.1/papaparse.min.js'></script>
+<script>
+const DEFAULT_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQCjjfWxIv18Rz-podyF1w2yKpohYL6zdhyW6s4Qf5Gub9uFRVkC_vkoZbAxvFxEZWFhKG9ccL_mXgr/pub?gid=0&single=true&output=csv';
+let DATA = [];
+
+function shuffle(arr){return arr.map(a=>[Math.random(),a]).sort((a,b)=>a[0]-b[0]).map(a=>a[1]);}
+
+function loadCSV(url){
+ fetch(url).then(r=>r.text()).then(csv=>{
+   const parsed = Papa.parse(csv, {header:true});
+   DATA = parsed.data.filter(r=>r.word && r.jp);
+   startQuiz();
+ });
+}
+
+function startQuiz(){
+ document.body.innerHTML = '<h2>クイズ開始</h2>';
+ let idx = 0, score = 0;
+ nextQ();
+
+ function nextQ(){
+   if(idx>=DATA.length){
+     document.body.innerHTML = `<h2>結果: ${score}/${DATA.length}</h2>`;
+     return;
+   }
+   const q = DATA[idx];
+   const wrongs = shuffle(DATA.filter(d=>d.jp!==q.jp)).slice(0,3).map(d=>d.jp);
+   const choices = shuffle([q.jp, ...wrongs]);
+   let html = `<p><b>${q.word}</b></p>`;
+   choices.forEach(c=>{
+     html += `<button onclick=\"check('${c.replace(/'/g,'')}')\">${c}</button><br>`;
+   });
+   document.body.innerHTML = html;
+ }
+
+ window.check = function(ans){
+   if(ans === DATA[idx].jp){score++;}
+   idx++; nextQ();
+ };
+}
+
+loadCSV(DEFAULT_CSV_URL);
+</script>" style="width:100%;height:600px;border:none;"></iframe>
+<p>このHTMLをGitHubにアップロードし、VercelやGitHub Pagesで公開すれば、上記スプレッドシートの内容を自動で読み込むクイズが動作します。</p>
+</body>
+</html>

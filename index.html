@@ -9,11 +9,11 @@
     :root{--bg:#0b1020;--panel:#111827;--ink:#e5e7eb;--muted:#9ca3af;--accent:#0ea5e9;--ok:#10b981;--ng:#ef4444}
     html,body{height:100%;background:linear-gradient(180deg,#0b1020,#0b1020 35%,#0d1326);}
     body{margin:0;font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; color:var(--ink)}
-    .wrap{max-width:760px;margin:0 auto;padding:20px}
-    header{display:flex;align-items:center;gap:12px}
+    .wrap{max-width:860px;margin:0 auto;padding:18px}
+    header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
     header h1{font-size:20px;margin:0;font-weight:800}
     .card{background:rgba(17,24,39,.72);backdrop-filter:saturate(140%) blur(8px);
-          border:1px solid rgba(255,255,255,.06);border-radius:18px; padding:16px}
+          border:1px solid rgba(255,255,255,.06);border-radius:18px; padding:14px}
     .muted{color:var(--muted)}
     .stack{display:grid; gap:14px}
     .pill{display:inline-flex;align-items:center;gap:8px; padding:6px 10px; border-radius:999px;
@@ -21,13 +21,17 @@
     .progress{height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden}
     .progress > span{display:block; height:100%; background:linear-gradient(90deg,#34d399,#0ea5e9); width:0%}
     .prompt{font-size:26px;font-weight:900}
-    .choice{border-radius:14px;border:1px solid rgba(255,255,255,.08); padding:14px; background:rgba(255,255,255,.04); display:flex; align-items:center; gap:12px}
+    .reading{font-size:16px;color:var(--muted)}
+    .choice{width:100%; text-align:left; border-radius:14px;border:1px solid rgba(255,255,255,.08); padding:14px; background:rgba(255,255,255,.04); display:flex; align-items:center; gap:12px; margin-top:8px}
     .choice.correct{outline:2px solid var(--ok)}
     .choice.wrong{outline:2px solid var(--ng)}
     button{appearance:none;border:none;cursor:pointer; border-radius:14px; padding:12px 14px;
       background: linear-gradient(180deg,#16b3f3,#0ea5e9); color:white; font-weight:700;}
     button:disabled{opacity:.6;cursor:not-allowed}
     .btn-sec{background:rgba(255,255,255,.06); color:var(--ink); border:1px solid rgba(255,255,255,.08)}
+    .toolbar{display:flex;gap:8px; align-items:center; flex-wrap:wrap}
+    select,input[type="checkbox"]{padding:10px;border-radius:10px;border:1px solid rgba(255,255,255,.12);background:rgba(255,255,255,.06);color:var(--ink)}
+    .tiny{font-size:12px}
   </style>
 </head>
 <body>
@@ -38,11 +42,27 @@
       <span id="status" class="pill" style="margin-left:auto">読み込み中…</span>
     </header>
 
+    <section class="card stack" id="controls">
+      <div class="toolbar">
+        <label class="tiny muted">出題範囲</label>
+        <select id="groupSel" title="50語ごとのグループ">
+          <option value="all">すべて</option>
+        </select>
+        <label class="tiny muted">出題数</label>
+        <select id="countSel"></select>
+        <label class="tiny muted"><input type="checkbox" id="randMode" checked> ランダム</label>
+        <button id="btnStart">この設定で開始</button>
+        <button class="btn-sec" id="btnReload">データ再読込</button>
+      </div>
+      <div class="tiny muted">※ グループは50語単位で自動作成されます。単語が増えても上部セレクトに追加されます。</div>
+    </section>
+
     <section id="view-quiz" class="card stack" style="display:none">
       <div class="progress"><span id="bar" style="width:0%"></span></div>
       <div class="prompt" id="prompt">単語</div>
+      <div class="reading" id="reading"></div>
       <div class="muted" id="sub"></div>
-      <div id="choices" class="stack"></div>
+      <div id="choices"></div>
       <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
         <div class="muted">正答 <b id="score">0</b></div>
         <div>
@@ -55,7 +75,7 @@
       <div style="font-size:40px;font-weight:900">結果</div>
       <div class="muted">スコア</div>
       <div style="font-size:56px;font-weight:900"><span id="finalScore">0</span>/<span id="finalTotal">0</span></div>
-      <div style="display:flex;gap:10px"><button id="btnRetry">もう一度</button><button class="btn-sec" id="btnReload">データ再読込</button></div>
+      <div style="display:flex;gap:10px"><button id="btnRetry">もう一度</button><button class="btn-sec" id="btnBack">設定に戻る</button></div>
     </section>
 
     <section id="view-error" class="card" style="display:none"></section>
@@ -64,28 +84,80 @@
   <!-- ライブラリ -->
   <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
   <script>
+  // === 設定 ===
   const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQCjjfWxIv18Rz-podyF1w2yKpohYL6zdhyW6s4Qf5Gub9uFRVkC_vkoZbAxvFxEZWFhKG9ccL_mXgr/pub?gid=0&single=true&output=csv';
+  const GROUP_SIZE = 50; // 50語ずつ
+
+  // === 状態 ===
   let DATA = [];
   let SESSION = null; // {i,q,score}
 
+  // === ユーティリティ ===
   const $ = (s)=>document.querySelector(s);
   const show = (id)=>{ ['#view-quiz','#view-result','#view-error'].forEach(x=>$(x).style.display='none'); $(id).style.display='grid'; };
   const shuffle = (arr)=>arr.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(v=>v[1]);
 
+  // === 読み（発音）取得：辞書API→ローカルキャッシュ→簡易カナ変換の順でフォールバック ===
+  async function getReading(word){
+    // 複数語や記号が含まれる場合はCSVの読み列（あれば）だけを使う
+    const csvReading = DATA_READING[word.toLowerCase()] || '';
+    const isSingle = /^[A-Za-z][A-Za-z'-]*$/.test(word.trim());
+    if(!isSingle){ return csvReading; }
+    const cacheKey = 'pron_'+word.toLowerCase();
+    const cached = localStorage.getItem(cacheKey);
+    if(cached) return cached;
+    try{
+      const url = 'https://api.dictionaryapi.dev/api/v2/entries/en/'+encodeURIComponent(word);
+      const res = await fetch(url, {mode:'cors'});
+      if(res.ok){
+        const json = await res.json();
+        // phonetics[0].text にIPAがあることが多い
+        const ipa = json?.[0]?.phonetics?.find(p=>p.text)?.text || '';
+        if(ipa){ localStorage.setItem(cacheKey, ipa); return ipa; }
+      }
+    }catch(e){ /* ignore */ }
+    // 簡易カナ（超ラフ変換）
+    const kana = word
+      .toLowerCase()
+      .replace(/tion/g,'ション')
+      .replace(/sion/g,'ジョン')
+      .replace(/ture/g,'チャー')
+      .replace(/[aeiou]+/g,'ア')
+      .replace(/th/g,'ス')
+      .replace(/ch/g,'チ')
+      .replace(/sh/g,'シ')
+      .replace(/[a-z]/g,'');
+    const fallback = kana ? `(${kana})` : '';
+    localStorage.setItem(cacheKey, fallback);
+    return fallback || csvReading;
+  }
+  const DATA_READING = {}; // もしCSVに reading 列を追加したら使う
+
+  // === CSV読込 ===
   async function loadCSV(){
     $('#status').textContent='読み込み中…';
     try{
       const res = await fetch(CSV_URL, {cache:'no-cache'});
       if(!res.ok) throw new Error('CSV取得に失敗: '+res.status);
       const text = await res.text();
-      const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
+      const parsed = Papa.parse(text, {header:true, skipEmptyLines:true, transformHeader: h => (h||'').replace(/^﻿/, '').trim().toLowerCase()});
       const list = parsed.data.map(r=>({
-        id:r.id||'', unit:r.unit||'', word:(r.word||'').trim(), jp:(r.jp||'').trim(), pos:r.pos||'', level:r.level||'', explanation:r.explanation||''
+        id:(r.id||r['﻿id']||'').toString().trim(),
+        unit:(r.unit||'').trim(),
+        word:(r.word||r.en||'').toString().trim(),
+        jp:(r.jp||r.ja||r.meaning||'').toString().trim(),
+        pos:(r.pos||'').trim(),
+        level:(r.level||'').trim(),
+        explanation:(r.explanation||r.note||'').trim(),
+        reading:(r.reading||r.pron||'').toString().trim()
       })).filter(r=>r.word && r.jp);
       if(!list.length) throw new Error('CSVに有効な行がありません（word/jp 列が必要）');
       DATA = list;
+      // reading 列があればキャッシュ
+      DATA.forEach(x=>{ if(x.reading){ DATA_READING[x.word.toLowerCase()] = x.reading; } });
       $('#status').textContent = `${DATA.length}語`;
-      startQuiz();
+      buildGroups();
+      prepareCountOptions();
     }catch(e){
       console.error(e);
       $('#view-error').innerHTML = `<b>読み込みエラー</b><div class='muted'>${e.message}</div>`;
@@ -94,6 +166,31 @@
     }
   }
 
+  // === グループ作成（50語単位） ===
+  function buildGroups(){
+    const sel = $('#groupSel');
+    sel.innerHTML = '<option value="all">すべて</option>';
+    const groups = Math.ceil(DATA.length / GROUP_SIZE);
+    for(let i=0;i<groups;i++){
+      const start = i*GROUP_SIZE+1; const end = Math.min((i+1)*GROUP_SIZE, DATA.length);
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = `グループ${i+1}（${start}-${end}）`;
+      sel.appendChild(opt);
+    }
+  }
+
+  function prepareCountOptions(){
+    const sel = $('#countSel'); sel.innerHTML='';
+    const max = Math.min(50, DATA.length);
+    const steps = [10,20,30,40,50];
+    steps.filter(n=>n<=Math.max(max,10)).forEach(n=>{
+      const o=document.createElement('option'); o.value=String(n); o.textContent=`${n}問`; sel.appendChild(o);
+    });
+    if(!sel.value) sel.value = String(Math.min(20,max));
+  }
+
+  // === クイズ生成 ===
   function pickDistractors(item, pool, n){
     const target = item.jp; const tlen = target.length;
     let cand = pool.filter(p=>p!==item);
@@ -104,10 +201,22 @@
     return out.slice(0,n);
   }
 
+  function getRangeByGroup(){
+    const v = $('#groupSel').value;
+    if(v==='all') return DATA;
+    const idx = parseInt(v,10);
+    const start = idx*GROUP_SIZE; const end = Math.min((idx+1)*GROUP_SIZE, DATA.length);
+    return DATA.slice(start,end);
+  }
+
   function startQuiz(){
-    const count = Math.min(20, DATA.length); // 最大20問
-    const q = shuffle(DATA).slice(0,count).map(item=>{
-      const wrongs = pickDistractors(item, DATA, 3);
+    let pool = getRangeByGroup();
+    const count = parseInt($('#countSel').value,10) || Math.min(20, pool.length);
+    const isRand = $('#randMode').checked;
+    if(isRand) pool = shuffle(pool);
+    pool = pool.slice(0, count);
+    const q = pool.map(item=>{
+      const wrongs = pickDistractors(item, getRangeByGroup(), 3);
       const choices = shuffle([ {text:item.jp, ok:true}, ...wrongs.map(t=>({text:t, ok:false})) ]);
       return { item, prompt:item.word, sub:item.pos||'', choices, picked:null };
     });
@@ -115,22 +224,25 @@
     renderQuiz();
   }
 
-  function renderQuiz(){
+  async function renderQuiz(){
     show('#view-quiz');
     const { i, q, score } = SESSION; const curr = q[i];
     $('#prompt').textContent = curr.prompt;
-    $('#sub').textContent = curr.sub;
+    $('#sub').textContent = curr.sub; // 品詞を表示
     $('#bar').style.width = `${(i/q.length)*100}%`;
     $('#score').textContent = String(score);
     $('#btnNext').disabled = true;
     const list = $('#choices'); list.innerHTML='';
+    // 読みの取得（IPAやカナ）
+    const reading = DATA_READING[curr.item.word.toLowerCase()] || await getReading(curr.item.word);
+    $('#reading').textContent = reading ? reading : '';
+
     curr.choices.forEach((c)=>{
       const el = document.createElement('button');
       el.className='choice'; el.type='button'; el.textContent=c.text;
       el.onclick=()=>{
         if(curr.picked!=null) return; // 二度押し防止
         curr.picked = c.text;
-        // 色付け
         [...list.children].forEach((btn)=>{
           const ok = curr.choices.find(x=>x.text===btn.textContent)?.ok;
           btn.classList.add(ok?'correct':'wrong');
@@ -143,14 +255,18 @@
     });
   }
 
+  // === イベント ===
+  $('#btnStart').onclick = ()=> startQuiz();
+  $('#btnReload').onclick = ()=> loadCSV();
   $('#btnNext').onclick = ()=>{
     if(++SESSION.i >= SESSION.q.length){
       $('#finalScore').textContent = SESSION.score; $('#finalTotal').textContent = SESSION.q.length; show('#view-result'); $('#bar').style.width='100%';
     } else { renderQuiz(); }
   };
   $('#btnRetry').onclick = ()=> startQuiz();
-  $('#btnReload').onclick = ()=> loadCSV();
+  $('#btnBack').onclick = ()=> { show('#controls'); };
 
+  // 初回ロード
   loadCSV();
   </script>
 </body>

@@ -1,56 +1,157 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>英単語クイズ</title>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>英単語クイズ（CSV自動読み込み・スマホ対応）</title>
+  <meta name="theme-color" content="#0ea5e9" />
+  <style>
+    :root{--bg:#0b1020;--panel:#111827;--ink:#e5e7eb;--muted:#9ca3af;--accent:#0ea5e9;--ok:#10b981;--ng:#ef4444}
+    html,body{height:100%;background:linear-gradient(180deg,#0b1020,#0b1020 35%,#0d1326);}
+    body{margin:0;font-family: system-ui,-apple-system,Segoe UI,Roboto,Helvetica,Arial; color:var(--ink)}
+    .wrap{max-width:760px;margin:0 auto;padding:20px}
+    header{display:flex;align-items:center;gap:12px}
+    header h1{font-size:20px;margin:0;font-weight:800}
+    .card{background:rgba(17,24,39,.72);backdrop-filter:saturate(140%) blur(8px);
+          border:1px solid rgba(255,255,255,.06);border-radius:18px; padding:16px}
+    .muted{color:var(--muted)}
+    .stack{display:grid; gap:14px}
+    .pill{display:inline-flex;align-items:center;gap:8px; padding:6px 10px; border-radius:999px;
+      background:rgba(255,255,255,.06); color:var(--ink); border:1px solid rgba(255,255,255,.08); font-size:12px}
+    .progress{height:10px; border-radius:999px; background:rgba(255,255,255,.08); overflow:hidden}
+    .progress > span{display:block; height:100%; background:linear-gradient(90deg,#34d399,#0ea5e9); width:0%}
+    .prompt{font-size:26px;font-weight:900}
+    .choice{border-radius:14px;border:1px solid rgba(255,255,255,.08); padding:14px; background:rgba(255,255,255,.04); display:flex; align-items:center; gap:12px}
+    .choice.correct{outline:2px solid var(--ok)}
+    .choice.wrong{outline:2px solid var(--ng)}
+    button{appearance:none;border:none;cursor:pointer; border-radius:14px; padding:12px 14px;
+      background: linear-gradient(180deg,#16b3f3,#0ea5e9); color:white; font-weight:700;}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    .btn-sec{background:rgba(255,255,255,.06); color:var(--ink); border:1px solid rgba(255,255,255,.08)}
+  </style>
 </head>
 <body>
-<h1>英単語クイズ（スマホ対応・CSV自動読み込み版）</h1>
-<p>このページは、指定のGoogleスプレッドシートCSVを自動で読み込み、ブラウザ上で英単語クイズを行うWebアプリです。</p>
-<iframe srcdoc="<script src='https://unpkg.com/papaparse@5.4.1/papaparse.min.js'></script>
-<script>
-const DEFAULT_CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQCjjfWxIv18Rz-podyF1w2yKpohYL6zdhyW6s4Qf5Gub9uFRVkC_vkoZbAxvFxEZWFhKG9ccL_mXgr/pub?gid=0&single=true&output=csv';
-let DATA = [];
+  <div class="wrap">
+    <header>
+      <div class="pill">英単語クイズ</div>
+      <h1>CSV自動読み込み・スマホ対応</h1>
+      <span id="status" class="pill" style="margin-left:auto">読み込み中…</span>
+    </header>
 
-function shuffle(arr){return arr.map(a=>[Math.random(),a]).sort((a,b)=>a[0]-b[0]).map(a=>a[1]);}
+    <section id="view-quiz" class="card stack" style="display:none">
+      <div class="progress"><span id="bar" style="width:0%"></span></div>
+      <div class="prompt" id="prompt">単語</div>
+      <div class="muted" id="sub"></div>
+      <div id="choices" class="stack"></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px">
+        <div class="muted">正答 <b id="score">0</b></div>
+        <div>
+          <button id="btnNext" disabled>次の問題 ▶</button>
+        </div>
+      </div>
+    </section>
 
-function loadCSV(url){
- fetch(url).then(r=>r.text()).then(csv=>{
-   const parsed = Papa.parse(csv, {header:true});
-   DATA = parsed.data.filter(r=>r.word && r.jp);
-   startQuiz();
- });
-}
+    <section id="view-result" class="card stack" style="display:none">
+      <div style="font-size:40px;font-weight:900">結果</div>
+      <div class="muted">スコア</div>
+      <div style="font-size:56px;font-weight:900"><span id="finalScore">0</span>/<span id="finalTotal">0</span></div>
+      <div style="display:flex;gap:10px"><button id="btnRetry">もう一度</button><button class="btn-sec" id="btnReload">データ再読込</button></div>
+    </section>
 
-function startQuiz(){
- document.body.innerHTML = '<h2>クイズ開始</h2>';
- let idx = 0, score = 0;
- nextQ();
+    <section id="view-error" class="card" style="display:none"></section>
+  </div>
 
- function nextQ(){
-   if(idx>=DATA.length){
-     document.body.innerHTML = `<h2>結果: ${score}/${DATA.length}</h2>`;
-     return;
-   }
-   const q = DATA[idx];
-   const wrongs = shuffle(DATA.filter(d=>d.jp!==q.jp)).slice(0,3).map(d=>d.jp);
-   const choices = shuffle([q.jp, ...wrongs]);
-   let html = `<p><b>${q.word}</b></p>`;
-   choices.forEach(c=>{
-     html += `<button onclick=\"check('${c.replace(/'/g,'')}')\">${c}</button><br>`;
-   });
-   document.body.innerHTML = html;
- }
+  <!-- ライブラリ -->
+  <script src="https://unpkg.com/papaparse@5.4.1/papaparse.min.js"></script>
+  <script>
+  const CSV_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQCjjfWxIv18Rz-podyF1w2yKpohYL6zdhyW6s4Qf5Gub9uFRVkC_vkoZbAxvFxEZWFhKG9ccL_mXgr/pub?gid=0&single=true&output=csv';
+  let DATA = [];
+  let SESSION = null; // {i,q,score}
 
- window.check = function(ans){
-   if(ans === DATA[idx].jp){score++;}
-   idx++; nextQ();
- };
-}
+  const $ = (s)=>document.querySelector(s);
+  const show = (id)=>{ ['#view-quiz','#view-result','#view-error'].forEach(x=>$(x).style.display='none'); $(id).style.display='grid'; };
+  const shuffle = (arr)=>arr.map(v=>[Math.random(),v]).sort((a,b)=>a[0]-b[0]).map(v=>v[1]);
 
-loadCSV(DEFAULT_CSV_URL);
-</script>" style="width:100%;height:600px;border:none;"></iframe>
-<p>このHTMLをGitHubにアップロードし、VercelやGitHub Pagesで公開すれば、上記スプレッドシートの内容を自動で読み込むクイズが動作します。</p>
+  async function loadCSV(){
+    $('#status').textContent='読み込み中…';
+    try{
+      const res = await fetch(CSV_URL, {cache:'no-cache'});
+      if(!res.ok) throw new Error('CSV取得に失敗: '+res.status);
+      const text = await res.text();
+      const parsed = Papa.parse(text, {header:true, skipEmptyLines:true});
+      const list = parsed.data.map(r=>({
+        id:r.id||'', unit:r.unit||'', word:(r.word||'').trim(), jp:(r.jp||'').trim(), pos:r.pos||'', level:r.level||'', explanation:r.explanation||''
+      })).filter(r=>r.word && r.jp);
+      if(!list.length) throw new Error('CSVに有効な行がありません（word/jp 列が必要）');
+      DATA = list;
+      $('#status').textContent = `${DATA.length}語`;
+      startQuiz();
+    }catch(e){
+      console.error(e);
+      $('#view-error').innerHTML = `<b>読み込みエラー</b><div class='muted'>${e.message}</div>`;
+      show('#view-error');
+      $('#status').textContent='エラー';
+    }
+  }
+
+  function pickDistractors(item, pool, n){
+    const target = item.jp; const tlen = target.length;
+    let cand = pool.filter(p=>p!==item);
+    if(item.unit){ const same = cand.filter(p=>p.unit===item.unit); if(same.length>=n) cand=same; }
+    cand = cand.sort((a,b)=> Math.abs((a.jp||'').length - tlen) - Math.abs((b.jp||'').length - tlen));
+    const out=[]; for(const c of cand){ if(!c.jp || c.jp===target) continue; if(out.includes(c.jp)) continue; out.push(c.jp); if(out.length>=n) break; }
+    if(out.length<n){ const rnd = shuffle(pool).map(p=>p.jp).filter(v=>v && v!==target && !out.includes(v)); out.push(...rnd.slice(0,n-out.length)); }
+    return out.slice(0,n);
+  }
+
+  function startQuiz(){
+    const count = Math.min(20, DATA.length); // 最大20問
+    const q = shuffle(DATA).slice(0,count).map(item=>{
+      const wrongs = pickDistractors(item, DATA, 3);
+      const choices = shuffle([ {text:item.jp, ok:true}, ...wrongs.map(t=>({text:t, ok:false})) ]);
+      return { item, prompt:item.word, sub:item.pos||'', choices, picked:null };
+    });
+    SESSION = { i:0, q, score:0 };
+    renderQuiz();
+  }
+
+  function renderQuiz(){
+    show('#view-quiz');
+    const { i, q, score } = SESSION; const curr = q[i];
+    $('#prompt').textContent = curr.prompt;
+    $('#sub').textContent = curr.sub;
+    $('#bar').style.width = `${(i/q.length)*100}%`;
+    $('#score').textContent = String(score);
+    $('#btnNext').disabled = true;
+    const list = $('#choices'); list.innerHTML='';
+    curr.choices.forEach((c)=>{
+      const el = document.createElement('button');
+      el.className='choice'; el.type='button'; el.textContent=c.text;
+      el.onclick=()=>{
+        if(curr.picked!=null) return; // 二度押し防止
+        curr.picked = c.text;
+        // 色付け
+        [...list.children].forEach((btn)=>{
+          const ok = curr.choices.find(x=>x.text===btn.textContent)?.ok;
+          btn.classList.add(ok?'correct':'wrong');
+          btn.disabled=true;
+        });
+        if(c.ok) SESSION.score++;
+        $('#btnNext').disabled=false;
+      };
+      list.appendChild(el);
+    });
+  }
+
+  $('#btnNext').onclick = ()=>{
+    if(++SESSION.i >= SESSION.q.length){
+      $('#finalScore').textContent = SESSION.score; $('#finalTotal').textContent = SESSION.q.length; show('#view-result'); $('#bar').style.width='100%';
+    } else { renderQuiz(); }
+  };
+  $('#btnRetry').onclick = ()=> startQuiz();
+  $('#btnReload').onclick = ()=> loadCSV();
+
+  loadCSV();
+  </script>
 </body>
 </html>
